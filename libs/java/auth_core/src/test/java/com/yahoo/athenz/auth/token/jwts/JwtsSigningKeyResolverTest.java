@@ -16,17 +16,43 @@
 package com.yahoo.athenz.auth.token.jwts;
 
 import com.yahoo.athenz.auth.util.CryptoException;
+import com.yahoo.rdl.JSON;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.PublicKey;
 import java.util.Objects;
 
 import static org.testng.Assert.*;
 
 public class JwtsSigningKeyResolverTest {
+    private static final Logger LOG = LoggerFactory.getLogger(JwtsSigningKeyResolverTest.class);
+
 
     private final ClassLoader classLoader = this.getClass().getClassLoader();
+
+    @Test
+    public void testAthenzConf() throws IOException {
+        System.setProperty(JwtsSigningKeyResolver.ZTS_PROP_ATHENZ_CONF, "src/test/resources/ec2-athenz.conf");
+
+        final String openIdConfigUri = "https://zts.athenz.ouroath.com:4443/zts/v1" + "/.well-known/openid-configuration";
+        JwtsHelper helper = new JwtsHelper();
+        final String jwksUri = helper.extractJwksUri(openIdConfigUri, null);
+
+        LOG.info("jwksUri: {}", jwksUri);
+
+        JwtsSigningKeyResolver resolver = new JwtsSigningKeyResolver(jwksUri, null);
+
+        PublicKey key = resolver.getPublicKey("aws.prod.us-west-2.1");
+        assertNotNull(key);
+
+        LOG.info("Public Key: {}", key);
+    }
 
     @Test
     public void testGetPublicKey() {
