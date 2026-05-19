@@ -142,12 +142,12 @@ public class X509CertUtilsTest {
         X509Certificate cert = Crypto.loadX509Certificate(pem);
 
         Principal principal = SimplePrincipal.create("user", "joe", "creds");
-        String logLine = X509CertUtils.logRecord(principal, "10.11.12.13", "athenz.provider",
+        String logLine = X509CertUtils.logRecord(principal, null, "10.11.12.13", "athenz.provider",
                 "instance-id-1234", cert);
         assertEquals(logLine, "10.11.12.13 user.joe athenz.provider \"instance-id-1234\" \"CN=athenz.api,O=Athenz,ST=CA,C=US\" \"CN=AthenzTestCA,O=AthenzTest,ST=CA,C=US\" 11380750808733699965 1629005177000");
 
-        logLine = X509CertUtils.logRecord(null, "10.11.12.13", "athenz.provider", null, cert);
-        assertEquals(logLine, "10.11.12.13 - athenz.provider - \"CN=athenz.api,O=Athenz,ST=CA,C=US\" \"CN=AthenzTestCA,O=AthenzTest,ST=CA,C=US\" 11380750808733699965 1629005177000");
+        logLine = X509CertUtils.logRecord(null, null, "10.11.12.13", "athenz.provider", null, cert);
+        assertEquals(logLine, "10.11.12.13 athenz.api athenz.provider - \"CN=athenz.api,O=Athenz,ST=CA,C=US\" \"CN=AthenzTestCA,O=AthenzTest,ST=CA,C=US\" 11380750808733699965 1629005177000");
     }
 
     @Test
@@ -157,14 +157,14 @@ public class X509CertUtilsTest {
         // record with all nulls since nothing will be processed
         // when logger is null
 
-        X509CertUtils.logCert(null, null, null, null, null, null);
+        X509CertUtils.logCert(null, null, null, null, null, null, null);
         X509CertUtils.logSSH(null, null, null, null, null);
 
         // we should get a null pointer exception when passing null
         // for our certificate but the log method will catch
         // all exceptions and the test will pass without any errors
 
-        X509CertUtils.logCert(LOGGER, null, "10.11.12.13", "athenz.api", "id1234", null);
+        X509CertUtils.logCert(LOGGER, null, null, "10.11.12.13", "athenz.api", "id1234", null);
         X509CertUtils.logSSH(LOGGER, null, "10.11.12.13", "athenz.api", "id1234");
 
         // now let's pass with valid cert
@@ -179,7 +179,22 @@ public class X509CertUtilsTest {
         X509Certificate cert = Crypto.loadX509Certificate(pem);
 
         Principal principal = SimplePrincipal.create("user", "joe", "creds");
-        X509CertUtils.logCert(LOGGER, principal, "10.11.12.13", "athenz.provider", "instance-id-1234", cert);
+        X509CertUtils.logCert(LOGGER, principal, null, "10.11.12.13", "athenz.provider", "instance-id-1234", cert);
+    }
+
+    @Test
+    public void testResolveLogPrincipalName() {
+        Principal principal = SimplePrincipal.create("user", "joe", "creds");
+        assertEquals(X509CertUtils.resolveLogPrincipalName(principal, null, null), "user.joe");
+        assertEquals(X509CertUtils.resolveLogPrincipalName(null, "msd.stage.waypoint", null),
+                "msd.stage.waypoint");
+
+        Path path = Paths.get("src/test/resources/athenz_hostname.cert.pem");
+        X509Certificate cert = Crypto.loadX509Certificate(path.toFile());
+        assertEquals(X509CertUtils.resolveLogPrincipalName(null, null, cert),
+                "athenz.examples.httpd");
+        assertEquals(X509CertUtils.resolveLogPrincipalName(null, "msd.stage.waypoint", cert),
+                "msd.stage.waypoint");
     }
 
     @Test

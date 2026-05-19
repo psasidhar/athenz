@@ -60,6 +60,7 @@ import static com.yahoo.athenz.common.server.util.config.ConfigManagerSingleton.
 public class InstanceCertManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(InstanceCertManager.class);
+    private static final Logger X509_CERT_LOGGER = LoggerFactory.getLogger("X509CertLogger");
 
     private static final String CA_TYPE_X509 = "x509";
     private static final String ZTS_SVC_TOKEN_PROVIDER = "zts-svc-token-provider";
@@ -1260,18 +1261,21 @@ public class InstanceCertManager {
 
     public void logX509Cert(final Principal principal, final String ip, final String provider,
             final String instanceId, final X509Certificate x509Cert) {
+        logX509Cert(principal, null, ip, provider, instanceId, x509Cert);
+    }
+
+    public void logX509Cert(final Principal principal, final String servicePrincipal, final String ip,
+            final String provider, final String instanceId, final X509Certificate x509Cert) {
 
         if (certStore == null) {
             return;
         }
 
-        // catch and ignore all exceptions. logging is not significant
-        // to return failure if we have received a valid certificate
-        // from our certificate signer. The certstore implementation
-        // must log any failures.
-
+        // Log directly via X509CertUtils so x509cert logging does not depend on the
+        // CertRecordStore interface version on ext-classpath (/opt/zts/jars/svr).
         try {
-            certStore.log(principal, ip, provider, instanceId, x509Cert);
+            X509CertUtils.logCert(X509_CERT_LOGGER, principal, servicePrincipal, ip, provider,
+                    instanceId, x509Cert);
         } catch (Exception ignored) {
         }
     }

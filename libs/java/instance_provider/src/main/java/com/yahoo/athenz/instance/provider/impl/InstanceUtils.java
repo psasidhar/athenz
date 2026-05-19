@@ -207,11 +207,17 @@ public class InstanceUtils {
         }
         String[] hosts = hostnames.split(",");
 
-        // extract the instance id from the request
-
+        // Prefer instance id from CSR SAN DNS or SAN URI (CSI and legacy flows). Only when
+        // absent, fall back to ZTS_INSTANCE_ID — set server-side by ZTS from the validated
+        // K8s SA token UID (cert-manager control-plane certs without {uid}.instanceid.athenz).
         if (!extractCertRequestInstanceId(attributes, hosts, dnsSuffixes, instanceId)) {
-            LOGGER.error("Request does not contain expected instance id entry");
-            return false;
+            final String ztsInstanceId = getInstanceProperty(attributes, InstanceProvider.ZTS_INSTANCE_ID);
+            if (!StringUtil.isEmpty(ztsInstanceId)) {
+                instanceId.append(ztsInstanceId);
+            } else {
+                LOGGER.error("Request does not contain expected instance id entry");
+                return false;
+            }
         }
 
         // for hostnames that are included in the sanDNS entry in the certificate we have

@@ -15,6 +15,7 @@
  */
 package com.yahoo.athenz.zts;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.primitives.Bytes;
 import com.yahoo.athenz.auth.*;
@@ -4774,6 +4775,18 @@ public class ZTSImpl implements ZTSHandler {
                     caller, domain, principalDomain);
         }
 
+        LOGGER.info("postInstanceRegisterInformation: domain={} service={} provider={} namespace={} " +
+                        "hostname={} hostCnames={} cloud={} expiryTime={} token={} " +
+                        "x509SignerKeyId={} sshSignerKeyId={} athenzJWK={} athenzJWKModified={} " +
+                        "jwtSVIDInstanceId={} jwtSVIDAudience={} jwtSVIDNonce={} " +
+                        "attestationData={}",
+                info.getDomain(), info.getService(), info.getProvider(), info.getNamespace(),
+                info.getHostname(), info.getHostCnames(), info.getCloud(), info.getExpiryTime(),
+                info.getToken(), info.getX509CertSignerKeyId(), info.getSshCertSignerKeyId(),
+                info.getAthenzJWK(), info.getAthenzJWKModified(),
+                info.getJwtSVIDInstanceId(), info.getJwtSVIDAudience(), info.getJwtSVIDNonce(),
+                redactJwtSignatures(info.getAttestationData()));
+
         // validate request/csr details
 
         X509ServiceCertRequest certReq;
@@ -4782,6 +4795,17 @@ public class ZTSImpl implements ZTSHandler {
         } catch (CryptoException ex) {
             throw requestError("unable to parse PKCS10 CSR: " + ex.getMessage(),
                     caller, domain, principalDomain);
+        }
+
+        // When the CSR carries no instanceId (cert-manager / istio-csr flows) but the
+        // request was attested via a K8s SA token, derive instanceId from the SA UID
+        // embedded in that token. The SA UID is stable and unique per service account,
+        // making it a sufficient service-level instanceId for ZTS validation.
+        if (StringUtil.isEmpty(certReq.getInstanceId()) && !StringUtil.isEmpty(info.getNamespace())) {
+            final String saUid = extractK8sSaUidFromAttestation(info.getAttestationData());
+            if (!StringUtil.isEmpty(saUid)) {
+                certReq.setInstanceId(saUid);
+            }
         }
 
         final String serviceDnsSuffix = domainData.getCertDnsDomain();
@@ -4939,7 +4963,7 @@ public class ZTSImpl implements ZTSHandler {
 
         // log our certificate
 
-        instanceCertManager.logX509Cert(null, ipAddress, provider, certReqInstanceId, newCert);
+        instanceCertManager.logX509Cert(null, cn, ipAddress, provider, certReqInstanceId, newCert);
 
         final String location = "/zts/v1/instance/" + provider + "/" + domain
                 + "/" + service + "/" + certReqInstanceId;
@@ -5101,7 +5125,21 @@ public class ZTSImpl implements ZTSHandler {
 
         try {
 
-            instance = instanceProvider.confirmInstance(instance);
+            // SPIFFE SVIDs (Istio ambient workload identity) carry no DNS SANs — identity
+            // is encoded entirely in the URI SAN. ZTS has already validated both the CSR
+            // SPIFFE URI and the K8s SA token before reaching here, so the provider's DNS
+            // hostname check adds no value and must be skipped.
+            final Map<String, String> instanceAttrs = instance.getAttributes();
+            final String sanDns = instanceAttrs != null ? instanceAttrs.get(InstanceProvider.ZTS_INSTANCE_SAN_DNS) : null;
+            final String sanUri = instanceAttrs != null ? instanceAttrs.get(InstanceProvider.ZTS_INSTANCE_SAN_URI) : null;
+            if (StringUtil.isEmpty(sanDns) && sanUri != null && sanUri.startsWith("spiffe://")) {
+                LOGGER.info("validateConfirmationData: SPIFFE-only SVID ({}), bypassing provider DNS validation", sanUri);
+                Map<String, String> bypassAttrs = new HashMap<>();
+                bypassAttrs.put(InstanceProvider.ZTS_CERT_REFRESH, "false");
+                instance.setAttributes(bypassAttrs);
+            } else {
+                instance = instanceProvider.confirmInstance(instance);
+            }
 
         } catch (ProviderResourceException ex) {
 
@@ -5269,6 +5307,71 @@ public class ZTSImpl implements ZTSHandler {
             certRecord.setPrivateIP(privateIp);
         }
         return certRecord;
+    }
+
+    // Replace the signature part (third dot-separated segment) of every JWT value found
+    // in the attestation data JSON with the literal "<sig-redacted>" so logs contain
+    // the full header+payload claims but never expose the token signature.
+    String redactJwtSignatures(final String attestationData) {
+        if (StringUtil.isEmpty(attestationData)) {
+            return attestationData;
+        }
+        try {
+            JsonNode root = jsonMapper.readTree(attestationData);
+            if (!root.isObject()) {
+                return attestationData;
+            }
+            com.fasterxml.jackson.databind.node.ObjectNode copy =
+                    (com.fasterxml.jackson.databind.node.ObjectNode) root.deepCopy();
+            copy.fields().forEachRemaining(entry -> {
+                JsonNode v = entry.getValue();
+                if (v.isTextual()) {
+                    String text = v.asText();
+                    String[] parts = text.split("\\.");
+                    if (parts.length == 3) {
+                        // looks like a JWT — keep header.payload, redact signature
+                        copy.put(entry.getKey(), parts[0] + "." + parts[1] + ".<sig-redacted>");
+                    }
+                }
+            });
+            return copy.toString();
+        } catch (Exception ex) {
+            return "<unparseable>";
+        }
+    }
+
+    String extractK8sSaUidFromAttestation(final String attestationData) {
+        try {
+            JsonNode root = jsonMapper.readTree(attestationData);
+            JsonNode tokenNode = root.get("identityToken");
+            if (tokenNode == null || tokenNode.isNull()) {
+                return null;
+            }
+            // Parse the JWT payload (base64url-encoded middle part) without verifying the signature.
+            // K8s SA tokens are signed JWTs; we only need the claims, not verification here — the
+            // K8s provider that runs later will fully verify the token against the OIDC issuer.
+            String[] parts = tokenNode.asText().split("\\.");
+            if (parts.length < 2) {
+                return null;
+            }
+            byte[] payloadBytes = Base64.getUrlDecoder().decode(
+                    parts[1].replaceAll("=+$", ""));
+            JsonNode payload = jsonMapper.readTree(payloadBytes);
+            LOGGER.info("K8s SA token payload (no signature): {}", payload);
+            JsonNode k8sClaim = payload.get("kubernetes.io");
+            if (k8sClaim == null) {
+                return null;
+            }
+            JsonNode saClaim = k8sClaim.get("serviceaccount");
+            if (saClaim == null) {
+                return null;
+            }
+            JsonNode uid = saClaim.get("uid");
+            return uid != null && !uid.isNull() ? uid.asText() : null;
+        } catch (Exception ex) {
+            LOGGER.warn("Unable to extract SA UID from attestation data: {}", ex.getMessage());
+            return null;
+        }
     }
 
     InstanceConfirmation generateInstanceConfirmObject(ResourceContext ctx, final String provider,

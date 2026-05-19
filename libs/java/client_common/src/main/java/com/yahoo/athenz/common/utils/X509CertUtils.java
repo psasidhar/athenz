@@ -284,19 +284,40 @@ public class X509CertUtils {
         return Hex.encodeHexString(Crypto.sha256(modulus.getBytes(StandardCharsets.UTF_8)));
     }
 
+    static String resolveLogPrincipalName(final Principal principal, final String servicePrincipal,
+            final X509Certificate x509Cert) {
+        if (principal != null) {
+            return principal.getFullName();
+        }
+        if (servicePrincipal != null && !servicePrincipal.isEmpty()) {
+            return servicePrincipal;
+        }
+        if (x509Cert == null) {
+            return null;
+        }
+        final String cn = Crypto.extractX509CertCommonName(x509Cert);
+        if (cn != null && !cn.isEmpty()) {
+            return cn;
+        }
+        return null;
+    }
+
     public static void logCert(final Logger certLogger, final Principal principal,
                 final String ip, final String provider, final String instanceId,
                 final X509Certificate x509Cert) {
+        logCert(certLogger, principal, null, ip, provider, instanceId, x509Cert);
+    }
+
+    public static void logCert(final Logger certLogger, final Principal principal,
+                final String servicePrincipal, final String ip, final String provider,
+                final String instanceId, final X509Certificate x509Cert) {
 
         if (certLogger == null) {
             return;
         }
 
-        // generate our cert object log record and log it
-        // with the given logger
-
         try {
-            certLogger.info(logRecord(principal, ip, provider, instanceId, x509Cert));
+            certLogger.info(logRecord(principal, servicePrincipal, ip, provider, instanceId, x509Cert));
         } catch (Exception ex) {
             LOGGER.error("Unable to generate certificate log record: {}", ex.getMessage());
         }
@@ -315,8 +336,9 @@ public class X509CertUtils {
         certLogger.info("{} {} {} {}", ip, principal, service, instanceId);
     }
 
-    public static String logRecord(final Principal principal, final String ip, final String provider,
-            final String instanceId, final X509Certificate x509Cert) {
+    public static String logRecord(final Principal principal, final String servicePrincipal,
+            final String ip, final String provider, final String instanceId,
+            final X509Certificate x509Cert) {
 
         StringBuilder buf = TLS_BUILDER.get();
         buf.setLength(0);
@@ -327,12 +349,12 @@ public class X509CertUtils {
         buf.append(ip);
         buf.append(' ');
 
-        // now append our principal. if this is an instance register
-        // operation then we have no principal so we're going to
-        // just use - to indicate no principal
+        // Principal: authenticated caller, else servicePrincipal from the request (e.g.
+        // domain.service on instance register), else Subject CN from the issued cert.
 
-        if (principal != null) {
-            buf.append(principal.getFullName());
+        final String logPrincipal = resolveLogPrincipalName(principal, servicePrincipal, x509Cert);
+        if (logPrincipal != null) {
+            buf.append(logPrincipal);
         } else {
             buf.append('-');
         }

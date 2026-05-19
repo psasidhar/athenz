@@ -37,15 +37,40 @@ public class SpiffeUriTrustDomain implements SpiffeUriValidator {
     private static final String SPIFFE_TRUST_DOMAIN = System.getProperty(SPIFFE_PROP_TRUST_DOMAIN, "athenz.io");
 
     /**
-     * Service Cert URI: spiffe://<trustDomain>/ns/<namespace>/sa/<domainName>.<serviceName>
-     *     Example: spiffe://athenz.io/ns/prod/sa/athenz.api
+     * Service Cert URI: two accepted forms.
+     *
+     * Form 1 (Approach A — cluster infra, dotted SA):
+     *   spiffe://<trustDomain>/ns/<namespace>/sa/<domainName>.<serviceName>
+     *   Example: spiffe://athenz.io/ns/istio-system/sa/athenz.k8s.nonprod.istiod
+     *
+     * Form 2 (Approach C hybrid — application workloads, dot-free SA):
+     *   spiffe://<trustDomain>/ns/<namespace>/sa/<serviceName>
+     *   Example: spiffe://athenz.io/ns/calypso-nonprod/sa/curl
+     *   Accepted only when namespace.replace("-", ".") equals domainName, ensuring the
+     *   namespace round-trips to the claimed Athenz domain.
      */
     @Override
     public boolean validateServiceCertUri(String spiffeUri, String domainName, String serviceName, String namespace) {
         final String ns = StringUtil.isEmpty(namespace) ? SPIFFE_DEFAULT_NAMESPACE : namespace;
-        final String reqUri = String.format("spiffe://%s/ns/%s/sa/%s.%s", SPIFFE_TRUST_DOMAIN,
+
+        // Form 1: spiffe://{trustDomain}/ns/{namespace}/sa/{domain}.{service}
+        final String form1Uri = String.format("spiffe://%s/ns/%s/sa/%s.%s", SPIFFE_TRUST_DOMAIN,
                 ns, domainName, serviceName);
-        return reqUri.equalsIgnoreCase(spiffeUri);
+        if (form1Uri.equalsIgnoreCase(spiffeUri)) {
+            return true;
+        }
+
+        // Form 2: spiffe://{trustDomain}/ns/{namespace}/sa/{service}
+        // Valid only when the namespace encodes the claimed domain (hyphen→dot round-trip).
+        if (ns.replace("-", ".").equalsIgnoreCase(domainName)) {
+            final String form2Uri = String.format("spiffe://%s/ns/%s/sa/%s", SPIFFE_TRUST_DOMAIN,
+                    ns, serviceName);
+            if (form2Uri.equalsIgnoreCase(spiffeUri)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -54,12 +54,16 @@ public class X509ServiceCertRequest extends X509CertRequest {
         }
 
         // validate the common name in CSR and make sure it
-        // matches to the values specified in the info object
+        // matches to the values specified in the info object.
+        // Skip when CN is empty: SPIFFE SVIDs encode identity in the URI SAN,
+        // not the CN, and the URI is validated below.
 
-        final String infoCommonName = domainName + "." + serviceName;
-        if (!validateCommonName(infoCommonName)) {
-            errorMsg.append("Unable to validate CSR common name");
-            return false;
+        if (!StringUtil.isEmpty(cn)) {
+            final String infoCommonName = domainName + "." + serviceName;
+            if (!validateCommonName(infoCommonName)) {
+                errorMsg.append("Unable to validate CSR common name");
+                return false;
+            }
         }
 
         // ensure the uri Hostname is same as instance Hostname that gets further verified later
@@ -101,6 +105,25 @@ public class X509ServiceCertRequest extends X509CertRequest {
 
         if (spiffeUri == null) {
             return true;
+        }
+
+        // SA annotation approach (Patch #4): accept Form 2 SPIFFE URI when the service name
+        // has no dots. A dot-free service name means the SA carries no encoded Athenz domain;
+        // the domain was supplied by athenz-issuer from the SA annotation athenz.io/domain.
+        // The namespace in the URI can be anything — namespace naming is not mandated.
+        // Form 2: spiffe://{trustDomain}/ns/{namespace}/sa/{service}
+        // The !serviceName.contains(".") guard prevents dotted-SA URIs from bypassing the
+        // standard Form 1 validator (spiffeUriManager.validateServiceCertUri).
+        if (namespace != null && !namespace.isEmpty() && !serviceName.contains(".")) {
+            final String prefix = "spiffe://";
+            final int nsIdx = spiffeUri.indexOf("/ns/");
+            if (spiffeUri.startsWith(prefix) && nsIdx != -1) {
+                final String trustDomain = spiffeUri.substring(prefix.length(), nsIdx);
+                final String form2Uri = String.format("spiffe://%s/ns/%s/sa/%s", trustDomain, namespace, serviceName);
+                if (form2Uri.equalsIgnoreCase(spiffeUri)) {
+                    return true;
+                }
+            }
         }
 
         return spiffeUriManager.validateServiceCertUri(spiffeUri, domainName, serviceName, namespace);

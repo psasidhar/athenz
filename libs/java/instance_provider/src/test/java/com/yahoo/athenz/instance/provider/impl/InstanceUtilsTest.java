@@ -133,6 +133,28 @@ public class InstanceUtilsTest {
     }
 
     @Test
+    public void testValidateCertRequestHostnamesWithZtsDerivedInstanceId() {
+        HashMap<String, String> attributes = new HashMap<>();
+        attributes.put("sanDNS", "istiod.athenz-k8s-nonprod.svc.cluster.local");
+        attributes.put(InstanceProvider.ZTS_INSTANCE_ID, "120ed2ec-783a-41a5-af89-177b1e175312");
+        StringBuilder id = new StringBuilder(256);
+        assertTrue(InstanceUtils.validateCertRequestSanDnsNames(attributes, "athenz.k8s.nonprod", "istiod",
+                Collections.singleton("svc.cluster.local"), null, null, false, id, null));
+        assertEquals(id.toString(), "120ed2ec-783a-41a5-af89-177b1e175312");
+    }
+
+    @Test
+    public void testValidateCertRequestHostnamesSanInstanceIdOverridesZtsAttribute() {
+        HashMap<String, String> attributes = new HashMap<>();
+        attributes.put("sanDNS", "api.athenz.athenz.cloud,i-1234.instanceid.athenz.athenz.cloud");
+        attributes.put(InstanceProvider.ZTS_INSTANCE_ID, "sa-uid-from-token");
+        StringBuilder id = new StringBuilder(256);
+        assertTrue(InstanceUtils.validateCertRequestSanDnsNames(attributes, "athenz", "api",
+                Collections.singleton("athenz.cloud"), null, null, false, id, null));
+        assertEquals(id.toString(), "i-1234");
+    }
+
+    @Test
     public void testValidateCertRequestHostnamesWithInstanceIdURI() {
         HashMap<String, String> attributes = new HashMap<>();
         attributes.put("sanDNS", "api.athenz.athenz.cloud");

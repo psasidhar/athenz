@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 
 import com.yahoo.athenz.auth.util.Crypto;
 import com.yahoo.athenz.auth.util.CryptoException;
+import com.yahoo.athenz.auth.util.StringUtils;
 
 public class X509CertRequest {
 
@@ -484,7 +485,7 @@ public class X509CertRequest {
 
         try {
             final String value = Crypto.extractX509CSRSubjectOField(certReq);
-            if (value == null) {
+            if (StringUtils.isEmpty(value)) {
                 return true;
             }
             boolean res = validValues.contains(value);
@@ -674,6 +675,10 @@ public class X509CertRequest {
     
     public String getInstanceId() {
         return instanceId;
+    }
+
+    public void setInstanceId(final String instanceId) {
+        this.instanceId = instanceId;
     }
 
     public String getUriHostname() {

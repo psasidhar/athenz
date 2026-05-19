@@ -15183,4 +15183,41 @@ public class ZTSImplTest {
         long authTime = claimsSet.getLongClaim("auth_time");
         assertEquals(iat, authTime);
     }
+
+    @Test
+    public void testExtractK8sSaUidFromAttestation() {
+        String payloadJson = "{\"sub\":\"system:serviceaccount:istio-system:ztunnel\"," +
+                "\"kubernetes.io\":{\"serviceaccount\":{\"name\":\"ztunnel\"," +
+                "\"uid\":\"4bb347cc-3316-4f0a-a630-3dabe247fc36\"}}}";
+        String payloadB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(payloadJson.getBytes(StandardCharsets.UTF_8));
+        String fakeJwt = "eyJhbGciOiJSUzI1NiJ9." + payloadB64 + ".fakesig";
+        String attestationData = "{\"identityToken\":\"" + fakeJwt + "\"}";
+
+        assertEquals(zts.extractK8sSaUidFromAttestation(attestationData),
+                "4bb347cc-3316-4f0a-a630-3dabe247fc36");
+
+        // missing kubernetes.io claim returns null
+        String noK8sJson = "{\"sub\":\"system:serviceaccount:ns:sa\"}";
+        String noK8sB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(noK8sJson.getBytes(StandardCharsets.UTF_8));
+        assertNull(zts.extractK8sSaUidFromAttestation(
+                "{\"identityToken\":\"h." + noK8sB64 + ".s\"}"));
+
+        // missing serviceaccount block returns null
+        String noSaJson = "{\"kubernetes.io\":{\"namespace\":\"ns\"}}";
+        String noSaB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(noSaJson.getBytes(StandardCharsets.UTF_8));
+        assertNull(zts.extractK8sSaUidFromAttestation(
+                "{\"identityToken\":\"h." + noSaB64 + ".s\"}"));
+
+        // missing identityToken field returns null
+        assertNull(zts.extractK8sSaUidFromAttestation("{\"other\":\"value\"}"));
+
+        // malformed JSON returns null without throwing
+        assertNull(zts.extractK8sSaUidFromAttestation("not-json"));
+
+        // JWT with fewer than 2 parts returns null
+        assertNull(zts.extractK8sSaUidFromAttestation("{\"identityToken\":\"onlyonepart\"}"));
+    }
 }

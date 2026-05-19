@@ -112,8 +112,15 @@ public class InstanceK8SProvider implements InstanceProvider {
             throw error("id_token in the attestation data is invalid. Additional details=" + errMsg);
         }
 
-        // next validate the san dns entries in the certificate request
-        if (!kubernetesDistributionValidator.validateSanDNSEntries(confirmation, errMsg)) {
+        // SPIFFE SVIDs (Istio ambient workload identity) carry no DNS SANs — the
+        // identity is encoded entirely in the URI SAN and was validated by ZTS upstream.
+        // Skip DNS validation in that case regardless of which distribution validator is configured.
+        final String sanDns = instanceAttributes.get(InstanceProvider.ZTS_INSTANCE_SAN_DNS);
+        final String sanUri = instanceAttributes.get(InstanceProvider.ZTS_INSTANCE_SAN_URI);
+        boolean spiffeSvidWithNoDns = StringUtil.isEmpty(sanDns) &&
+                sanUri != null && sanUri.startsWith("spiffe://");
+
+        if (!spiffeSvidWithNoDns && !kubernetesDistributionValidator.validateSanDNSEntries(confirmation, errMsg)) {
             throw error("Unable to validate certificate request hostnames. Additional details=" + errMsg);
         }
 
