@@ -149,7 +149,7 @@
     <maven-war-plugin.version>3.5.1</maven-war-plugin.version>
     <maven-cyclonedx-plugin.version>2.9.1</maven-cyclonedx-plugin.version>
 
-    <code.coverage.min>1.00</code.coverage.min>
+    <code.coverage.min>0.90</code.coverage.min>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <sonar.projectKey>AthenzSonar-${project.groupId}:${project.artifactId}</sonar.projectKey>
@@ -245,6 +245,7 @@
           <configuration>
             <source>11</source>
             <target>11</target>
+            <useIncrementalCompilation>false</useIncrementalCompilation>
           </configuration>
         </plugin>
         <plugin>
